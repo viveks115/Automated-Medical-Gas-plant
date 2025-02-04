@@ -4,8 +4,8 @@
 #include <Stepper.h>
 
 // WiFi credentials
-const char *ssid = "Wokwi-GUEST";
-const char *password = "";
+const char *ssid = "X_LINK_HOME";
+const char *password = "X-x02031a";
 
 // Web server on port 80
 WebServer server(80);
@@ -27,7 +27,7 @@ WebServer server(80);
 #define STEPPER_PIN2 12
 #define STEPPER_PIN3 14
 #define STEPPER_PIN4 27
-Stepper stepperMotor(200, STEPPER_PIN1, STEPPER_PIN3, STEPPER_PIN2, STEPPER_PIN4);
+Stepper stepperMotor(2048, STEPPER_PIN1, STEPPER_PIN3, STEPPER_PIN2, STEPPER_PIN4);
 
 // DHT sensor setup
 DHT dht(DHT_PIN, DHTTYPE);
@@ -42,7 +42,8 @@ bool valve2Open = false;
 float temperature = 0.0;
 float humidity = 0.0;
 uint8_t emergencyStop = 0;
-uint8_t highTemperature=0;
+uint8_t highTemperature = 0;
+uint8_t manualMode = 0;
 String generateHTML()
 {
   String html = R"rawliteral(
@@ -256,8 +257,20 @@ void setValve(int pin, bool state, bool &valveState)
 
 float safeReadSensor(int pin, const char *name)
 {
-  float value = analogRead(pin) / 4096.0 * 100;
-  if (isnan(value) || value < 0.0 || value > 100.0)
+  const float maxPressureMPa = 1.2; // Maximum pressure in MPa
+  const int maxAnalogValue = 1023;  // Maximum analog reading (10-bit ADC)
+  float value = 0;
+  if (pin == PRESSURE_SENSOR_PIN)
+  {
+    int analogReading = analogRead(PRESSURE_SENSOR_PIN); // Read the analog value
+    float pressureMPa = (analogReading / (float)maxAnalogValue) * maxPressureMPa;
+    value = pressureMPa * 145.0377;
+     Serial.println(value);
+  }
+  else
+  {
+  }
+  if (isnan(value) || value < 0.0 )//|| value > 100.0)
   {
     Serial.printf("Error: %s sensor returned invalid value.\n", name);
     return -1; // Indicate an error
@@ -268,9 +281,9 @@ float safeReadSensor(int pin, const char *name)
 void updateStepperMotor(float error)
 {
   Serial.println(error);
-  if (error < -0.5)
+  if (error < -10)
     stepperMotor.step(-10); // Decrease
-  else if (error > 0.5)
+  else if (error > 20)
     stepperMotor.step(10); // Increase
 }
 
@@ -288,10 +301,10 @@ void handleLiveData()
   // Alert messages
   if (emergencyStop)
   {
-    if(!highTemperature)
-    json += "\"alert\":\"Emergency Stop Activated. Set new pressure to resume.\"";
+    if (!highTemperature)
+      json += "\"alert\":\"Emergency Stop Activated. Set new pressure to resume.\"";
     else
-    json += "\"alert\":\"Emergency Stop DUE TO TEMPERATURE .\"";
+      json += "\"alert\":\"Emergency Stop DUE TO TEMPERATURE .\"";
   }
   else if (currentPressure < MIN_PRESSURE)
   {
@@ -358,8 +371,8 @@ void handleCheckLeak()
 // Setup and loop
 void setup()
 {
-  Serial.begin(115200);
-
+  Serial.begin(9600);
+    stepperMotor.setSpeed(10);
   // Pin configuration
   pinMode(PRESSURE_SENSOR_PIN, INPUT);
   pinMode(FLOW_SENSOR_PIN, INPUT);
@@ -393,6 +406,7 @@ void setup()
 
 void loop()
 {
+
   // Sensor updates
   currentPressure = safeReadSensor(PRESSURE_SENSOR_PIN, "Pressure");
   currentFlowRate = safeReadSensor(FLOW_SENSOR_PIN, "Flow");
@@ -401,33 +415,45 @@ void loop()
 
   if (!emergencyStop)
   {
-    float error = desiredPressure - currentPressure;
-    updateStepperMotor(error);
-
-    // Valve control logic
-    if (currentPressure <= 10 || currentPressure >= 80)//backup
+    if (!manualMode)
     {
-      setValve(VALVE1_PIN, false, valve1Open);
-      setValve(VALVE2_PIN, true, valve2Open);
+      // Valve control logic
+      if (currentPressure <= 10 || currentPressure >= 80) // backup
+      {
+        setValve(VALVE1_PIN, false, valve1Open);
+        setValve(VALVE2_PIN, true, valve2Open);
+      }
+      else // main valve
+      {
+        float error = desiredPressure - currentPressure;
+        if (error > 10)
+        {
+          stepperMotor.step(-10);
+        }
+        if (error < -10)
+        {
+          stepperMotor.step(10);
+        }
+        setValve(VALVE1_PIN, true, valve1Open);
+        setValve(VALVE2_PIN, false, valve2Open);
+      }
     }
-    else//main valve
+    else
     {
-      setValve(VALVE1_PIN, true, valve1Open);
-      setValve(VALVE2_PIN, false, valve2Open);
+      // THE THINGS TO DONE IN MANUAL OPERATION CONTROL THE VALE OPENING AND CLOSING VALVE ACCORDING TO USER
     }
   }
-    if (temperature <=-10||temperature >60)
-    {
-        emergencyStop=1;
-        highTemperature=1;
-        setValve(VALVE1_PIN, false, valve1Open);
-        setValve(VALVE2_PIN, false, valve2Open);
-    }
-    else{
-    highTemperature=0;
-
-    }
-  
+  if (temperature <= -10 || temperature > 60)
+  {
+    emergencyStop = 1;
+    highTemperature = 1;
+    setValve(VALVE1_PIN, false, valve1Open);
+    setValve(VALVE2_PIN, false, valve2Open);
+  }
+  else
+  {
+    highTemperature = 0;
+  }
 
   server.handleClient(); // Handle web server requests
   delay(500);
