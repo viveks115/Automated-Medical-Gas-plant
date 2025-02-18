@@ -1,0 +1,21 @@
+{
+	"folders": [
+		{
+			"path": "../../../../hello_world"
+		},
+		{
+			"name": "IDCARDFOR",
+			"path": "../IDCARDFOR"
+		},
+		{
+			"name": "AMS",
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"*.embeddedhtml": "html",
+			"esp_flash.h": "c"
+		}
+	}
+}
