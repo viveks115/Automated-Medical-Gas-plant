@@ -108,11 +108,10 @@ String generateHTML()
             document.getElementById("pressure").innerText =
               data.pressure + " PSI";
             document.getElementById("flow").innerText = data.flow + " L/min";
-            document.getElementById("temperature").innerText =
-              data.temperature + " 'C";
+            document.getElementById("roomtemp").innerText =data.roomtemp + " C";
+              document.getElementById("gastemp").innerText =data.gastemp + " C";
             document.getElementById("humidity").innerText =
               data.humidity + " %";
-              document.getElementById("concentration").innerText = data.concentration + " %";
             document.getElementById("valve1").innerText = data.valve1
               ? "Open"
               : "Closed";
@@ -145,13 +144,13 @@ String generateHTML()
         <span>Flow Rate:</span><span id="flow">Loading...</span>
       </div>
       <div class="data-block">
-        <span>Temperature:</span><span id="temperature">Loading...</span>
+        <span>cabin Temperature:</span><span id="roomtemp">Loading...</span>
+      </div>
+      <div class="data-block">
+        <span>Temperature inside:</span><span id="gastemp">Loading...</span>
       </div>
       <div class="data-block">
         <span>Humidity:</span><span id="humidity">Loading...</span>
-      </div>
-      <div class="data-block">
-        <span>O2 concentration:</span><span id="concentration">Loading...</span>
       </div>
       <div class="data-block">
         <span>Valve 1:</span><span id="valve1">Loading...</span>
@@ -171,7 +170,7 @@ String generateHTML()
             id="pressure-input"
             name="pressure"
             step="1"
-            value="50"
+            value="30"
           />
         </div>
         <!--<div class="form-group">-->
@@ -188,7 +187,9 @@ String generateHTML()
             <button onclick="sendCommand('/open_valve1')">Open Valve 1</button>
           </td>
           <td>
-            <button onclick="sendCommand('/close_valve1')">Close Valve 1</button>
+            <button onclick="sendCommand('/open_valve1')">
+              Close Valve 1
+            </button>
           </td>
         </tr>
         <tr>
@@ -217,6 +218,7 @@ String generateHTML()
     </div>
   </body>
 </html>
+
 
   )rawliteral";
   return html;

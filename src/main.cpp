@@ -1,7 +1,9 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include "DHT.h"
-#include <Stepper.h>
+// #include <Stepper.h>
+#include <AccelStepper.h>
+#include <ArduinoJson.h>
 #include <SoftwareSerial.h>
 String generateHTML();
 #define RX_PIN 25 // Define RX pin for communication with the sensor
@@ -17,6 +19,11 @@ const char *password = "1234567890";
 WebServer server(80);
 // #define MIN_PRESSURE 10
 // #define MAX_PRESSURE 80
+
+#define STEP_PIN 21
+#define DIR_PIN 19
+#define ENABLE_PIN 5
+AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
 
 // Define pins
 #define PRESSURE_SENSOR_PIN 34
@@ -35,27 +42,29 @@ WebServer server(80);
 #define STEPPER_PIN2 19
 #define STEPPER_PIN3 18
 #define STEPPER_PIN4 5
-Stepper stepperMotor(2048, STEPPER_PIN1, STEPPER_PIN3, STEPPER_PIN2, STEPPER_PIN4);
+// Stepper stepperMotor(2048, STEPPER_PIN1, STEPPER_PIN3, STEPPER_PIN2, STEPPER_PIN4);
 
 // DHT sensor setup
 DHT dht(DHT_PIN, DHTTYPE);
 
 // Monitoring variables
+int humanPass = 0;
 float currentPressure = 0.0;
 float currentFlowRate = 0.0;
-float desiredPressure = 20.0;
+float desiredPressure = 30.0;
 float desiredFlowRate = 5.0;
 float currentOconcentration = 0.0;
 bool valve1Open = false;
 bool valve2Open = false;
 bool valve3Open = false;
 float temperature = 0.0;
+float gasTemp = 0.0;
 float humidity = 0.0;
 uint8_t emergencyStop = 0;
 uint8_t highTemperature = 0;
 uint8_t manualMode = 0;
-float PRESSURE_MIN = 70; // Minimum acceptable pressure
-float PRESSURE_MAX = 80; // Maximum acceptable pressure
+float PRESSURE_MIN = 0;  // Minimum acceptable pressure
+float PRESSURE_MAX = 0;  // Maximum acceptable pressure
 #define BUZZER_CHANNEL 0 // ESP32 has 16 PWM channels (0-15)
 
 bool alarmActive = false;
@@ -103,17 +112,8 @@ char getCheckSum(char *getbuff)
 }
 void flowSensor()
 {
-  // if (oxygenSensor.available() >0)
-  // { // Check if we received the full 12-byte response
   uint8_t buffer[12];
   uint8_t index = 0;
-  //   for (int i = 0; i < 12; i++)
-  //   {
-  //     buffer[i] = oxygenSensor.read();
-  //     Serial.print("buffer=");
-  //     Serial.print(i);
-  //     Serial.println(buffer[i]);
-  //   }
   while (oxygenSensor.available())
   { // Read incoming data
     buffer[index] = oxygenSensor.read();
@@ -141,21 +141,20 @@ void flowSensor()
 
         // Extract temperature
         uint16_t temperature = (buffer[7] << 8) | buffer[8];
-        float temp = temperature / 10.0; // Convert to °C
-
+        gasTemp = (float)temperature / 10.0; // Convert to °C
         /*
-          Serial.print("Oxygen Concentration: ");
-          Serial.print(currentOconcentration);
-          Serial.println(" %");
+        Serial.print("Oxygen Concentration: ");
+        Serial.print(currentOconcentration);
+        Serial.println(" %");
 
-          Serial.print("Flow Rate: ");
-          Serial.print(currentFlowRate);
-          Serial.println(" L/min");
+        Serial.print("Flow Rate: ");
+        Serial.print(currentFlowRate);
+        Serial.println(" L/min");
 
-          Serial.print("Temperature in flowmeter: ");
-          Serial.print(temp);
-          Serial.println(" °C");
-          */
+        Serial.print("Temperature in flowmeter: ");
+        Serial.print(gasTemp);
+        Serial.println(" °C");
+        */
       }
       else
       {
@@ -201,49 +200,55 @@ void updateStepperMotor(float error)
 {
   Serial.println(error);
   if (error < -10)
-    stepperMotor.step(-10); // Decrease
+  {
+    // stepper.step(-10); // Decrease
+  }
   else if (error > 20)
-    stepperMotor.step(10); // Increase
+  {
+    // stepper.step(10); // Increase
+  }
 }
-// Web server handlers
 void handleLiveData()
 {
-  String json = "{";
-  json += "\"pressure\":" + String(currentPressure) + ",";
-  json += "\"flow\":" + String(currentFlowRate) + ",";
-  json += "\"temperature\":" + String(temperature) + ",";
-  json += "\"humidity\":" + String(humidity) + ",";
-  json += "\"concentration\":" + String(currentOconcentration) + ",";
-  json += "\"valve1\":" + String(valve1Open ? "true" : "false") + ",";
-  json += "\"valve2\":" + String(valve2Open ? "true" : "false") + ",";
-  json += "\"valve3\":" + String(valve3Open ? "true" : "false") + ",";
+  // StaticJsonDocument<256> jsonDoc; // Use ArduinoJson for safety
+  JsonDocument jsonDoc;
+  jsonDoc["pressure"] = isnan(currentPressure) ? 0.0 : currentPressure;
+  jsonDoc["flow"] = isnan(currentFlowRate) ? 0.0 : currentFlowRate;
+  jsonDoc["roomtemp"] = isnan(temperature) ? 0.0 : temperature;
+  jsonDoc["gastemp"] = isnan(gasTemp) ? 0.0 : gasTemp;
+  jsonDoc["humidity"] = isnan(humidity) ? 0.0 : humidity;
+  jsonDoc["concentration"] = isnan(currentOconcentration) ? 0.0 : currentOconcentration;
+
+  jsonDoc["valve1"] = valve1Open;
+  jsonDoc["valve2"] = valve2Open;
+  jsonDoc["valve3"] = valve3Open;
+
   if (emergencyStop)
   {
-    if (!highTemperature)
-      json += "\"alert\":\"Emergency Stop Activated. Set new pressure to resume.\"";
-    else
-      json += "\"alert\":\"Emergency Stop DUE TO TEMPERATURE .\"";
+    jsonDoc["alert"] = highTemperature ? "Emergency Stop DUE TO TEMPERATURE." : "Emergency Stop Activated. Set new pressure to resume.";
   }
   else if (currentPressure < PRESSURE_MIN)
   {
-    json += "\"alert\":\"Pressure critically low! Check system immediately.\"";
+    jsonDoc["alert"] = "Pressure critically low! Check system immediately.";
   }
   else if (currentPressure > PRESSURE_MAX)
   {
-    json += "\"alert\":\"Pressure dangerously high! Take action.\"";
+    jsonDoc["alert"] = "Pressure dangerously high! Take action.";
   }
   else if (manualMode)
   {
-    json += "\"alert\":\"ManualMode Activated\"";
+    jsonDoc["alert"] = "Manual Mode Activated";
   }
   else
   {
-    json += "\"alert\":null";
+    jsonDoc["alert"] = "";
   }
 
-  json += "}";
-  server.send(200, "application/json", json);
+  String jsonResponse;
+  serializeJson(jsonDoc, jsonResponse); // Convert JSON object to string
+  server.send(200, "application/json", jsonResponse);
 }
+
 void handleValve1Close()
 {
   setValve(VALVE1_PIN, false, valve1Open);
@@ -316,7 +321,7 @@ void handleCheckLeak()
 
   if (initialPressure - finalPressure > 20)
   {
-    tone(BUZZER_PIN, 1000);
+    // tone(BUZZER_PIN, 1000);
     server.send(200, "text/html", "<p>Leak Detected! Alert triggered.</p><a href='/'>Go Back</a>");
     // showAlert("Leak Detected! Alert triggered.");
   }
@@ -325,98 +330,170 @@ void handleCheckLeak()
     server.send(200, "text/html", "<p>No Leak Detected.</p><a href='/'>Go Back</a>");
   }
 
-  tone(BUZZER_PIN, 0);
+  // tone(BUZZER_PIN, 0);
 }
 void handleManualMode()
 {
   manualMode = 1;
   Serial.println("MANUAL MODE");
 }
-void controlValves(float currentPressure, float desiredPressure)
+
+void controlValves()
 {
+  constexpr float ERROR_THRESHOLD = 5.0;
+  static bool usingBackup = false; // Track the last active valve
+  static bool mainInRange = 0;
+  static bool backupInRange = 0;
+  if (humanPass)
+  {
+    if (!digitalRead(BUTTON_PIN))
+    {
+      humanPass = 0; // Reset human intervention mode
+      stopAlarm();
+      Serial.println("System reset by user. Rechecking pressure sources...");
+    }
+    else
+    {
+      return; // Stay in humanPass mode until button press
+    }
+  }
 
-  constexpr float ERROR_THRESHOLD = 5.0; // Acceptable pressure error before stepper correction
-
-  bool mainInRange = (currentPressure >= PRESSURE_MIN && currentPressure <= PRESSURE_MAX);
-  bool backupInRange = false;
+  currentPressure = safeReadSensor(PRESSURE_SENSOR_PIN, "Pressure");
+  if (!usingBackup)
+  {
+    mainInRange = (currentPressure >= PRESSURE_MIN && currentPressure <= PRESSURE_MAX);
+    backupInRange = false;
+  }
+  if (!mainInRange)
+  {
+    setValve(VALVE1_PIN, false, valve1Open); // Close Main Valve
+    setValve(VALVE2_PIN, true, valve2Open);  // Open Backup Valve
+    delay(1000);                             // Allow pressure stabilization
+    currentPressure = safeReadSensor(PRESSURE_SENSOR_PIN, "Pressure");
+    backupInRange = (currentPressure >= PRESSURE_MIN && currentPressure <= PRESSURE_MAX);
+  }
 
   if (mainInRange)
   {
-    tone(BUZZER_PIN, 0);
-    // Main source is available → Use Main Source
     setValve(VALVE1_PIN, true, valve1Open);  // Open Main Valve
     setValve(VALVE2_PIN, false, valve2Open); // Close Backup Valve
-
-    // Adjust pressure using stepper motor
-    float error = desiredPressure - currentPressure;
-    if (error > ERROR_THRESHOLD)
-    {
-      stepperMotor.step(-10); // Reduce Pressure
-    }
-    else if (error < -ERROR_THRESHOLD)
-    {
-      stepperMotor.step(10); // Increase Pressure
-    }
+    usingBackup = false;
+    stopAlarm();
+  }
+  else if (backupInRange)
+  {
+    usingBackup = true;
   }
   else
   {
-    startAlarm(2000, 5000);
-    //  Main Source Out of Range → Switch to Backup
-    setValve(VALVE1_PIN, false, valve1Open); // Close Main Valve
-    setValve(VALVE2_PIN, true, valve2Open);  // Open Backup Valve
-
-    // Recheck pressure with backup source
-    backupInRange = (currentPressure >= PRESSURE_MIN && currentPressure <= PRESSURE_MAX);
-
-    if (!backupInRange)
+    if (usingBackup)
     {
-      // Serial.println("CRITICAL ALERT:BACKUP ACTIVE");
-      //  Backup also failed → Recheck Main Source
+      setValve(VALVE1_PIN, true, valve1Open); // Retry Main Valve
+      setValve(VALVE2_PIN, false, valve2Open);
+      delay(1000);
+      currentPressure = safeReadSensor(PRESSURE_SENSOR_PIN, "Pressure");
+
+      float error = desiredPressure - currentPressure;
+      if (abs(error) > ERROR_THRESHOLD)
+      {
+        stepper.move(error > 0 ? 10 : -10); // Adjust Pressure
+        stepper.run();
+      }
       mainInRange = (currentPressure >= PRESSURE_MIN && currentPressure <= PRESSURE_MAX);
-      static int humanPass=0;
-      if (!mainInRange)
-      {
-        // No source is available → Shut Down & Alert
-        setValve(VALVE1_PIN, false, valve1Open);
-        setValve(VALVE2_PIN, false, valve2Open);
-        
-        if (humanPass == 0)
-        {
-          startAlarm(1000, 1000);
-          if(!digitalRead(BUTTON_PIN))
-          {
-            humanPass=1;
-            stopAlarm(); 
-          }
-        }
-        Serial.println("CRITICAL ALERT: No available pressure source! System shutting down.");
-      }
-      else
-      {
-        humanPass=0;
-        mainInRange = true;
-        backupInRange = false;
-        tone(BUZZER_PIN, 0);
-      }
+    }
+
+    if (!mainInRange)
+    {
+      setValve(VALVE1_PIN, false, valve1Open);
+      setValve(VALVE2_PIN, false, valve2Open);
+      startAlarm(1000, 1000);
+      humanPass = 1; // Enter human intervention mode
+      Serial.println("CRITICAL ALERT: No available pressure source! System shutting down.");
+      return;
     }
   }
 }
 
-// Setup and loop
+// void controlValves()
+// {
+
+//   constexpr float ERROR_THRESHOLD = 5.0; // Acceptable pressure error before stepper correction
+//   currentPressure = safeReadSensor(PRESSURE_SENSOR_PIN, "Pressure");
+//   bool mainInRange = (currentPressure >= PRESSURE_MIN && currentPressure <= PRESSURE_MAX);
+//   bool backupInRange = false;
+
+//   if (mainInRange)
+//   {
+//     stopAlarm();
+//     setValve(VALVE1_PIN, true, valve1Open);  // Open Main Valve
+//     setValve(VALVE2_PIN, false, valve2Open); // Close Backup Valve
+//   }
+//   else
+//   {
+//     // startAlarm(2000, 5000);
+//     setValve(VALVE1_PIN, false, valve1Open); // Close Main Valve
+//     setValve(VALVE2_PIN, true, valve2Open);  // Open Backup Valve
+//     delay(1000);
+//     currentPressure = safeReadSensor(PRESSURE_SENSOR_PIN, "Pressure");
+//     backupInRange = (currentPressure >= PRESSURE_MIN && currentPressure <= PRESSURE_MAX);
+//     // Adjust pressure using stepper motor
+//     float error = desiredPressure - currentPressure;
+//     if (error > ERROR_THRESHOLD)
+//     {
+//       stepper.move(-10); // Reduce Pressure
+//     }
+//     else if (error < -ERROR_THRESHOLD)
+//     {
+//       stepper.move(10); // Increase Pressure
+//     }
+//     stepper.run(); // Non-blocking step execution
+
+//     if (!backupInRange)
+//     {
+//       setValve(VALVE1_PIN, true, valve1Open);
+//       setValve(VALVE2_PIN, false, valve2Open);
+//       currentPressure = safeReadSensor(PRESSURE_SENSOR_PIN, "Pressure");
+//       mainInRange = (currentPressure >= PRESSURE_MIN && currentPressure <= PRESSURE_MAX);
+
+//       if (!mainInRange)
+//       {
+//         setValve(VALVE1_PIN, false, valve1Open);
+//         setValve(VALVE2_PIN, false, valve2Open);
+
+//         startAlarm(1000, 1000);
+//         humanPass = 1;
+//         Serial.println("CRITICAL ALERT: No available pressure source! System shutting down.");
+//       }
+//       else
+//       {
+//         humanPass = 0;
+//         mainInRange = true;
+//         backupInRange = false;
+//         stopAlarm();
+//       }
+//     }
+//   }
+// }
+
 void setup()
 {
   Serial.begin(9600);
+
   oxygenSensor.begin(9600);
-  stepperMotor.setSpeed(10);
+
+  stepper.setMaxSpeed(600);       // Set default max speed
+  stepper.setAcceleration(10000); // Set default acceleration
+
   // Pin configuration
   pinMode(PRESSURE_SENSOR_PIN, INPUT);
-  // pinMode(FLOW_SENSOR_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(BUTTON_PIN, INPUT);
   pinMode(VALVE1_PIN, OUTPUT);
   pinMode(VALVE2_PIN, OUTPUT);
   pinMode(VALVE3_PIN, OUTPUT);
   // pinMode(VALVE4_PIN, OUTPUT);
+  setValve(VALVE1_PIN, true, valve1Open);  // Open Main Valve
+  setValve(VALVE2_PIN, false, valve2Open); // Close Backup Valve
 
   dht.begin(); // Initialize DHT sensor
 
@@ -475,13 +552,13 @@ void loop()
   {
     if (!manualMode)
     {
-      controlValves(currentPressure, desiredPressure);
+      controlValves();
     }
     else
     {
 
       // THE THINGS TO DONE IN MANUAL OPERATION CONTROL THE VALE OPENING AND CLOSING VALVE ACCORDING TO USER
-      if (digitalRead(BUTTON_PIN))
+      if (!digitalRead(BUTTON_PIN))
       {
         // exit from manual mode
         manualMode = 0;

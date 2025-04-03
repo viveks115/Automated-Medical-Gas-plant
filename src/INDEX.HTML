@@ -105,6 +105,8 @@
             document.getElementById("flow").innerText = data.flow + " L/min";
             document.getElementById("temperature").innerText =
               data.temperature + "℃";
+              document.getElementById("Gastemperature").innerText =
+              data.temperature + "℃";
             document.getElementById("humidity").innerText =
               data.humidity + " %";
             document.getElementById("valve1").innerText = data.valve1
@@ -139,7 +141,10 @@
         <span>Flow Rate:</span><span id="flow">Loading...</span>
       </div>
       <div class="data-block">
-        <span>Temperature:</span><span id="temperature">Loading...</span>
+        <span>cabin Temperature:</span><span id="temperature">Loading...</span>
+      </div>
+      <div class="data-block">
+        <span>Temperature inside:</span><span id="Gastemperature">Loading...</span>
       </div>
       <div class="data-block">
         <span>Humidity:</span><span id="humidity">Loading...</span>
