@@ -110,7 +110,9 @@ String generateHTML()
             document.getElementById("flow").innerText = data.flow + " L/min";
             document.getElementById("roomtemp").innerText =data.roomtemp + " C";
               document.getElementById("gastemp").innerText =data.gastemp + " C";
-            document.getElementById("humidity").innerText =
+            document.getElementById("concentration").innerText =
+              data.concentration + " %";
+              document.getElementById("humidity").innerText =
               data.humidity + " %";
             document.getElementById("valve1").innerText = data.valve1
               ? "Open"
@@ -153,6 +155,9 @@ String generateHTML()
         <span>Humidity:</span><span id="humidity">Loading...</span>
       </div>
       <div class="data-block">
+        <span>O2 Concentration:</span><span id="concentration">Loading...</span>
+      </div>
+      <div class="data-block">
         <span>Valve 1:</span><span id="valve1">Loading...</span>
       </div>
       <div class="data-block">
@@ -187,7 +192,7 @@ String generateHTML()
             <button onclick="sendCommand('/open_valve1')">Open Valve 1</button>
           </td>
           <td>
-            <button onclick="sendCommand('/open_valve1')">
+            <button onclick="sendCommand('/close_valve1')">
               Close Valve 1
             </button>
           </td>

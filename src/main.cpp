@@ -48,6 +48,8 @@ AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
 DHT dht(DHT_PIN, DHTTYPE);
 
 // Monitoring variables
+unsigned long lastWiFiAttempt = 0;
+const unsigned long wifiRetryInterval = 10000; // retry every 10 seconds
 int humanPass = 0;
 float currentPressure = 0.0;
 float currentFlowRate = 0.0;
@@ -349,6 +351,12 @@ void controlValves()
     if (!digitalRead(BUTTON_PIN))
     {
       humanPass = 0; // Reset human intervention mode
+      usingBackup = 0;
+      mainInRange = 0;
+      usingBackup = 1;
+      setValve(VALVE1_PIN, true, valve1Open);  // Close Main Valve
+      setValve(VALVE2_PIN, false, valve2Open); // Open Backup Valve
+      delay(1000);
       stopAlarm();
       Serial.println("System reset by user. Rechecking pressure sources...");
     }
@@ -371,14 +379,27 @@ void controlValves()
     delay(1000);                             // Allow pressure stabilization
     currentPressure = safeReadSensor(PRESSURE_SENSOR_PIN, "Pressure");
     backupInRange = (currentPressure >= PRESSURE_MIN && currentPressure <= PRESSURE_MAX);
+    if(backupInRange){
+    float error = desiredPressure - currentPressure;
+    digitalWrite(ENABLE_PIN, LOW);
+    if (abs(error) > ERROR_THRESHOLD)
+    {
+      stepper.moveTo(error > 0 ? -200 : 200); // Adjust Pressure
+      while (stepper.currentPosition() != stepper.targetPosition()) {
+        stepper.run();
+    }
+    }
+  }
   }
 
   if (mainInRange)
   {
+
     setValve(VALVE1_PIN, true, valve1Open);  // Open Main Valve
     setValve(VALVE2_PIN, false, valve2Open); // Close Backup Valve
     usingBackup = false;
     stopAlarm();
+    digitalWrite(ENABLE_PIN, LOW); // stepper disable
   }
   else if (backupInRange)
   {
@@ -393,12 +414,7 @@ void controlValves()
       delay(1000);
       currentPressure = safeReadSensor(PRESSURE_SENSOR_PIN, "Pressure");
 
-      float error = desiredPressure - currentPressure;
-      if (abs(error) > ERROR_THRESHOLD)
-      {
-        stepper.move(error > 0 ? 10 : -10); // Adjust Pressure
-        stepper.run();
-      }
+    
       mainInRange = (currentPressure >= PRESSURE_MIN && currentPressure <= PRESSURE_MAX);
     }
 
@@ -481,8 +497,8 @@ void setup()
 
   oxygenSensor.begin(9600);
 
-  stepper.setMaxSpeed(600);       // Set default max speed
-  stepper.setAcceleration(10000); // Set default acceleration
+  stepper.setMaxSpeed(600);     // Good speed (depends on motor & driver)
+  stepper.setAcceleration(10000); // Smooth ramp-up/down
 
   // Pin configuration
   pinMode(PRESSURE_SENSOR_PIN, INPUT);
@@ -491,6 +507,7 @@ void setup()
   pinMode(VALVE1_PIN, OUTPUT);
   pinMode(VALVE2_PIN, OUTPUT);
   pinMode(VALVE3_PIN, OUTPUT);
+  pinMode(ENABLE_PIN, OUTPUT);
   // pinMode(VALVE4_PIN, OUTPUT);
   setValve(VALVE1_PIN, true, valve1Open);  // Open Main Valve
   setValve(VALVE2_PIN, false, valve2Open); // Close Backup Valve
@@ -576,7 +593,13 @@ void loop()
     highTemperature = 0;
   }
 
+
   server.handleClient(); // Handle web server requests
-  delay(500);
+  // stepper.run();
+  if (stepper.distanceToGo() == 0)
+  {
+    digitalWrite(ENABLE_PIN, HIGH); // Done moving, disable driver
+  }
+  delay(10);
   updateAlarm();
 }
